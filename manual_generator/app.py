@@ -72,7 +72,7 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
 
                 # AIに解析を依頼
                 st.info("AIが動画を視聴し、マニュアルを執筆中...")
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 prompt = """
                 この動画から業務マニュアルを作成してください。
                 重要な操作をピックアップし、以下のJSON形式のみで出力してください。
@@ -111,3 +111,4 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
 
             except Exception as e:
                 st.error(f"❌ エラーが発生しました: {e}")
+
