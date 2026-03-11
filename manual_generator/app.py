@@ -8,6 +8,7 @@ import tempfile
 import re
 from docx import Document
 from docx.shared import Inches
+from docx.oxml.ns import qn  # ← 日本語フォント設定のための追加部品
 
 # --- 初期設定 ---
 st.set_page_config(page_title="AIマニュアル生成", layout="centered")
@@ -37,6 +38,23 @@ def extract_json_from_text(text):
         return json.loads(json_str)
     else:
         raise ValueError("AIの回答からリスト形式のデータを抽出できませんでした。")
+
+# --- フォントをメイリオに変更する関数 ---
+def set_font_meiryo(doc):
+    # 1. 標準テキスト（Normal）のフォントをメイリオに
+    style_normal = doc.styles['Normal']
+    style_normal.font.name = 'メイリオ'
+    style_normal.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
+
+    # 2. 見出し1（Heading 1）のフォントをメイリオに
+    style_h1 = doc.styles['Heading 1']
+    style_h1.font.name = 'メイリオ'
+    style_h1.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
+
+    # 3. タイトル（Title）のフォントをメイリオに
+    style_title = doc.styles['Title']
+    style_title.font.name = 'メイリオ'
+    style_title.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
 
 # --- 画面UI ---
 st.title("🎥 AIマニュアル自動生成ツール")
@@ -89,6 +107,10 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
                 # Word作成
                 st.info("Wordファイルを生成中...")
                 doc = Document()
+                
+                # ⭐ ここでフォントを「メイリオ」に一括設定！ ⭐
+                set_font_meiryo(doc)
+
                 doc.add_heading('AI自動生成マニュアル', 0)
                 docx_path = os.path.join(temp_dir, "Manual.docx")
 
@@ -111,5 +133,3 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
 
             except Exception as e:
                 st.error(f"❌ エラーが発生しました: {e}")
-
-
