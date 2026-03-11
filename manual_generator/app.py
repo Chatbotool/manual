@@ -5,8 +5,15 @@ import os
 import json
 import time
 import tempfile
+import re
 from docx import Document
 from docx.shared import Inches
+
+# --- 初期設定 ---
+st.set_page_config(page_title="AIマニュアル生成", layout="centered")
+
+# Renderの環境変数からAPIキーを自動取得
+API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # --- 画像切り出し関数 ---
 def extract_frame(video_path, time_str, output_path):
@@ -21,25 +28,34 @@ def extract_frame(video_path, time_str, output_path):
     cap.release()
     return ret
 
+# --- AI出力からJSON（リスト）を安全に抽出する関数 ---
+def extract_json_from_text(text):
+    # ```python や ```json などの装飾を無視して [ ] の中身だけを抽出する
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if match:
+        json_str = match.group(0)
+        return json.loads(json_str)
+    else:
+        raise ValueError("AIの回答からリスト形式のデータを抽出できませんでした。")
+
 # --- 画面UI ---
-st.set_page_config(page_title="AIマニュアル生成", layout="centered")
 st.title("🎥 AIマニュアル自動生成ツール")
 st.write("動画をアップロードするだけで、画像付きのWordマニュアルを作成します。")
 
-# ユーザー入力エリア
-api_key = st.text_input("1. Gemini APIキーを入力 (セキュリティのため隠れます)", type="password")
-uploaded_video = st.file_uploader("2. 動画をアップロード (10MB〜30MB程度の短い動画を推奨)", type=["mp4", "mov"])
+if not API_KEY:
+    st.error("⚠️ システムエラー: 環境変数に GEMINI_API_KEY が設定されていません。管理者に連絡してください。")
+    st.stop()
+
+uploaded_video = st.file_uploader("マニュアル化する動画をアップロード (MP4/MOV)", type=["mp4", "mov"])
 
 if st.button("🚀 マニュアルを作成する", type="primary"):
-    if not api_key:
-        st.error("APIキーを入力してください。")
-    elif not uploaded_video:
+    if not uploaded_video:
         st.error("動画をアップロードしてください。")
     else:
-        with st.spinner("AIが動画を解析中です...（数分かかる場合があります）"):
+        with st.spinner("AIが動画を解析中です...（1〜3分程度かかります）"):
             try:
                 # 準備
-                genai.configure(api_key=api_key)
+                genai.configure(api_key=API_KEY)
                 temp_dir = tempfile.mkdtemp()
                 
                 # 動画を一時保存
@@ -48,53 +64,50 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
                     f.write(uploaded_video.read())
 
                 # 動画をGeminiにアップロード
+                st.info("動画をAIサーバーへ送信中...")
                 video_file = genai.upload_file(path=video_path)
                 while video_file.state.name == "PROCESSING":
                     time.sleep(5)
                     video_file = genai.get_file(video_file.name)
 
                 # AIに解析を依頼
+                st.info("AIが動画を視聴し、マニュアルを執筆中...")
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 prompt = """
                 この動画から業務マニュアルを作成してください。
                 重要な操作をピックアップし、以下のJSON形式のみで出力してください。
-                Markdown(```json等)や挨拶は一切不要です。
+                Markdown(```json等)や挨拶は一切不要です。純粋な配列のみを返してください。
                 [
                     {"time": "00:10", "text": "ログイン画面で入力します。"}
                 ]
                 """
                 response = model.generate_content([prompt, video_file])
                 
-                # 結果を整形
-                result_text = response.text.strip()
-                if result_text.startswith("
-http://googleusercontent.com/immersive_entry_chip/0
-http://googleusercontent.com/immersive_entry_chip/1
+                # AIの回答からデータを安全に抽出
+                ai_data = extract_json_from_text(response.text)
 
----
+                # Word作成
+                st.info("Wordファイルを生成中...")
+                doc = Document()
+                doc.add_heading('AI自動生成マニュアル', 0)
+                docx_path = os.path.join(temp_dir, "Manual.docx")
 
-### 🚀 フェーズ2：自分のパソコンでテスト起動する
+                for i, step in enumerate(ai_data):
+                    time_str = step['time']
+                    img_path = os.path.join(temp_dir, f"step_{i}.jpg")
+                    # 画像の切り出しが成功したらWordに書き込む
+                    if extract_frame(video_path, time_str, img_path):
+                        doc.add_heading(f"STEP {i+1}: {time_str}", level=1)
+                        doc.add_paragraph(step['text'])
+                        doc.add_picture(img_path, width=Inches(5.5))
+                        doc.add_page_break()
+                
+                doc.save(docx_path)
+                st.success("✨ マニュアルが完成しました！")
 
-GitHubに上げる前に、自分のパソコンでちゃんと画面が出るかテストします。
+                # ダウンロードボタン
+                with open(docx_path, "rb") as f:
+                    st.download_button("📄 Wordファイルをダウンロード", data=f, file_name="AI_Manual.docx")
 
-1. VS Codeの「ターミナル（黒い画面）」を開きます。
-2. 以下のコマンドを入力して、必要な部品をパソコンに入れます。
-   `pip install -r requirements.txt`
-3. インストールが終わったら、以下のコマンドでアプリを起動します。
-   `streamlit run app.py`
-4. 自動的にブラウザが立ち上がり、アプリの画面が表示されれば大成功です！
-
----
-
-### 🌐 フェーズ3：GitHub → Render へ
-
-パソコンで動くことが確認できたら、いよいよ公開です。
-
-1. **GitHubへアップロード (Push)**
-   VS Codeの左側にある「ソース管理（枝分かれしたアイコン）」から、コミットしてGitHubのリポジトリに発行（Push）します。
-2. **Renderで連携**
-   [Render](https://render.com/) にログインし、「New」>「Web Service」を選択。
-   あなたのGitHubリポジトリを選び、設定をそのまま進めて「Create Web Service」を押すだけです！
-
-まずは **フェーズ2（自分のパソコンでのテスト起動）** まで進めてみましょう。
-VS Codeのターミナルの開き方や、GitHubへのPushのやり方など、どこか分からない部分はありますか？詳しくサポートします！
+            except Exception as e:
+                st.error(f"❌ エラーが発生しました: {e}")
