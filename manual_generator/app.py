@@ -122,7 +122,7 @@ if st.button("Excelマニュアルを作成する", type="primary"):
                 # 列の幅を調整（見やすくするため）
                 ws.column_dimensions['A'].width = 15  # STEP列
                 ws.column_dimensions['B'].width = 50  # 説明列
-                ws.column_dimensions['C'].width = 60  # 画像列
+                ws.column_dimensions['C'].width = 120 # 画像列（画像拡大に合わせて60→120に変更しました）
 
                 # 3行目からデータを書き込んでいく
                 current_row = 3
@@ -149,7 +149,8 @@ if st.button("Excelマニュアルを作成する", type="primary"):
                         original_width = img.width
                         original_height = img.height
                         
-                        target_width = 400
+                        # 👇 ここが画像の大きさを決める数字です（400→800に変更）
+                        target_width = 800
                         if original_width > 0:
                             target_height = int(original_height * (target_width / original_width))
                             img.width = target_width
