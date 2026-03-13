@@ -6,32 +6,36 @@ import json
 import time
 import tempfile
 import re
-from docx import Document
-from docx.shared import Inches
-from docx.oxml.ns import qn  # ← 日本語フォント設定のための追加部品
+import openpyxl
+from openpyxl.drawing.image import Image as ExcelImage
+from openpyxl.styles import Alignment, Font
 
 # --- 初期設定 ---
 st.set_page_config(page_title="AIマニュアル生成", layout="centered")
 
-# Renderの環境変数からAPIキーを自動取得
+# Renderの環境変数からAPIキーを読み込む
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # --- 画像切り出し関数 ---
 def extract_frame(video_path, time_str, output_path):
-    minutes, seconds = map(float, time_str.split(':'))
-    total_seconds = minutes * 60 + seconds
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, int(total_seconds * fps))
-    ret, frame = cap.read()
-    if ret:
-        cv2.imwrite(output_path, frame)
-    cap.release()
-    return ret
+    """指定された時間のフレームを動画から切り出して保存する"""
+    try:
+        minutes, seconds = map(float, time_str.split(':'))
+        total_seconds = minutes * 60 + seconds
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(total_seconds * fps))
+        ret, frame = cap.read()
+        if ret:
+            cv2.imwrite(output_path, frame)
+        cap.release()
+        return ret
+    except Exception:
+        return False
 
 # --- AI出力からJSON（リスト）を安全に抽出する関数 ---
 def extract_json_from_text(text):
-    # ```python や ```json などの装飾を無視して [ ] の中身だけを抽出する
+    """AIが回答に余計な装飾を付けてもJSON部分だけを抜き出す"""
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if match:
         json_str = match.group(0)
@@ -39,38 +43,21 @@ def extract_json_from_text(text):
     else:
         raise ValueError("AIの回答からリスト形式のデータを抽出できませんでした。")
 
-# --- フォントをメイリオに変更する関数 ---
-def set_font_meiryo(doc):
-    # 1. 標準テキスト（Normal）のフォントをメイリオに
-    style_normal = doc.styles['Normal']
-    style_normal.font.name = 'メイリオ'
-    style_normal.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
-
-    # 2. 見出し1（Heading 1）のフォントをメイリオに
-    style_h1 = doc.styles['Heading 1']
-    style_h1.font.name = 'メイリオ'
-    style_h1.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
-
-    # 3. タイトル（Title）のフォントをメイリオに
-    style_title = doc.styles['Title']
-    style_title.font.name = 'メイリオ'
-    style_title.font._element.rPr.rFonts.set(qn('w:eastAsia'), 'メイリオ')
-
-# --- 画面UI ---
-st.title("🎥 AIマニュアル自動生成ツール")
-st.write("動画をアップロードするだけで、画像付きのWordマニュアルを作成します。")
+# --- 画面UI構成 ---
+st.title("🎥 AIマニュアル自動作成ツール")
+st.write("動画をアップロードするだけで、画像付きの【Excelマニュアル】を作成します。")
 
 if not API_KEY:
-    st.error("⚠️ システムエラー: 環境変数に GEMINI_API_KEY が設定されていません。管理者に連絡してください。")
+    st.error("システム設定エラー: Renderの環境変数に GEMINI_API_KEY が設定されていません。")
     st.stop()
 
 uploaded_video = st.file_uploader("マニュアル化する動画をアップロード (MP4/MOV)", type=["mp4", "mov"])
 
-if st.button("🚀 マニュアルを作成する", type="primary"):
+if st.button("Excelマニュアルを作成する", type="primary"):
     if not uploaded_video:
-        st.error("動画をアップロードしてください。")
+        st.warning("動画ファイルを先にアップロードしてください。")
     else:
-        with st.spinner("AIが動画を解析中です...（1〜3分程度かかります）"):
+        with st.spinner("AIが動画を解析し、Excelを作成中...（数分かかります）"):
             try:
                 # 準備
                 genai.configure(api_key=API_KEY)
@@ -81,55 +68,108 @@ if st.button("🚀 マニュアルを作成する", type="primary"):
                 with open(video_path, "wb") as f:
                     f.write(uploaded_video.read())
 
-                # 動画をGeminiにアップロード
-                st.info("動画をAIサーバーへ送信中...")
+                # 動画をGeminiサーバーへ送信
+                st.info("AIに動画を送信しています...")
                 video_file = genai.upload_file(path=video_path)
+                
                 while video_file.state.name == "PROCESSING":
                     time.sleep(5)
                     video_file = genai.get_file(video_file.name)
 
-                # AIに解析を依頼
-                st.info("AIが動画を視聴し、マニュアルを執筆中...")
+                # AIに指示を出す
+                st.info("AIが内容を分析し、マニュアルを執筆しています...")
                 model = genai.GenerativeModel('gemini-2.5-flash')
                 prompt = """
-                この動画を解析して、業務の操作マニュアルを詳しく作成してください。
-                重要な操作をピックアップし、以下のJSON形式のみで出力してください。
-                Markdown(```json等)や挨拶は一切不要です。純粋な配列のみを返してください。
+                この動画を解析して、操作マニュアルを日本語で詳しく作成してください。
+                重要な操作ステップを抽出し、以下の純粋なJSONリスト形式のみで出力してください。
+                Markdown(```json等)は一切含めないでください。
                 [
-                    {"time": "00:10", "text": "ログイン画面で入力します。"}
+                    {"time": "00:10", "text": "ログイン画面でユーザー名を入力します。"}
                 ]
                 """
                 response = model.generate_content([prompt, video_file])
                 
-                # AIの回答からデータを安全に抽出
+                # セキュリティ：即座に動画削除
+                genai.delete_file(video_file.name)
+                
+                # JSON抽出
                 ai_data = extract_json_from_text(response.text)
 
-                # Word作成
-                st.info("Wordファイルを生成中...")
-                doc = Document()
+                # ==========================================
+                # Excel文書の作成スタート
+                # ==========================================
+                st.info("画像を抽出してExcelファイルに整理しています...")
                 
-                # ⭐ ここでフォントを「メイリオ」に一括設定！ ⭐
-                set_font_meiryo(doc)
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "業務マニュアル"
+                
+                # 共通のフォント設定（メイリオ）
+                font_meiryo = Font(name='メイリオ')
+                font_meiryo_bold = Font(name='メイリオ', bold=True)
+                
+                # 1行目：タイトル
+                ws['A1'] = 'AI自動生成 操作マニュアル'
+                ws['A1'].font = Font(name='メイリオ', size=16, bold=True)
+                
+                # 2行目：ヘッダー（見出し）
+                headers = ['STEP / 時間', '操作説明', '画面画像']
+                for col_num, header in enumerate(headers, 1):
+                    cell = ws.cell(row=2, column=col_num, value=header)
+                    cell.font = font_meiryo_bold
+                    cell.alignment = Alignment(horizontal='center')
 
-                doc.add_heading('AI自動生成マニュアル', 0)
-                docx_path = os.path.join(temp_dir, "Manual.docx")
+                # 列の幅を調整（見やすくするため）
+                ws.column_dimensions['A'].width = 15  # STEP列
+                ws.column_dimensions['B'].width = 50  # 説明列
+                ws.column_dimensions['C'].width = 60  # 画像列
 
+                # 3行目からデータを書き込んでいく
+                current_row = 3
                 for i, step in enumerate(ai_data):
                     time_str = step['time']
-                    img_path = os.path.join(temp_dir, f"step_{i}.jpg")
-                    # 画像の切り出しが成功したらWordに書き込む
+                    desc_text = step['text']
+                    img_path = os.path.join(temp_dir, f"frame_{i}.jpg")
+                    
+                    # 行の高さを画像が入るように広げる（約200ピクセル分）
+                    ws.row_dimensions[current_row].height = 200
+                    
+                    # A列：STEPと時間
+                    cell_a = ws.cell(row=current_row, column=1, value=f"STEP {i+1}\n({time_str})")
+                    cell_a.font = font_meiryo_bold
+                    cell_a.alignment = Alignment(vertical='top', horizontal='center', wrap_text=True)
+                    
+                    # B列：説明文
+                    cell_b = ws.cell(row=current_row, column=2, value=desc_text)
+                    cell_b.font = font_meiryo
+                    cell_b.alignment = Alignment(vertical='top', wrap_text=True)
+                    
+                    # C列：画像の貼り付け
                     if extract_frame(video_path, time_str, img_path):
-                        doc.add_heading(f"STEP {i+1}: {time_str}", level=1)
-                        doc.add_paragraph(step['text'])
-                        doc.add_picture(img_path, width=Inches(5.5))
-                        doc.add_page_break()
+                        img = ExcelImage(img_path)
+                        # 画像サイズを少し縮小（横幅400pxに統一）
+                        img.width = 400
+                        if img.height:
+                            img.height = int(img.height * (400 / img.width))
+                        
+                        # C列の該当するセルに画像を配置
+                        ws.add_image(img, f'C{current_row}')
+                    
+                    current_row += 1
                 
-                doc.save(docx_path)
-                st.success("✨ マニュアルが完成しました！")
+                # Excelファイルの保存
+                excel_output_path = os.path.join(temp_dir, "AI_Manual_Result.xlsx")
+                wb.save(excel_output_path)
+                st.success("全行程が完了しました！")
 
                 # ダウンロードボタン
-                with open(docx_path, "rb") as f:
-                    st.download_button("📄 Wordファイルをダウンロード", data=f, file_name="AI_Manual.docx")
+                with open(excel_output_path, "rb") as f:
+                    st.download_button(
+                        label=" Excelマニュアルをダウンロード",
+                        data=f,
+                        file_name="Business_Manual.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
             except Exception as e:
-                st.error(f"❌ エラーが発生しました: {e}")
+                st.error(f"処理中にエラーが発生しました: {e}")
