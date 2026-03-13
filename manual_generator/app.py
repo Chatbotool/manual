@@ -131,9 +131,6 @@ if st.button("Excelマニュアルを作成する", type="primary"):
                     desc_text = step['text']
                     img_path = os.path.join(temp_dir, f"frame_{i}.jpg")
                     
-                    # 行の高さを画像が入るように広げる（約200ピクセル分）
-                    ws.row_dimensions[current_row].height = 200
-                    
                     # A列：STEPと時間
                     cell_a = ws.cell(row=current_row, column=1, value=f"STEP {i+1}\n({time_str})")
                     cell_a.font = font_meiryo_bold
@@ -144,16 +141,31 @@ if st.button("Excelマニュアルを作成する", type="primary"):
                     cell_b.font = font_meiryo
                     cell_b.alignment = Alignment(vertical='top', wrap_text=True)
                     
-                    # C列：画像の貼り付け
+                    # C列：画像の貼り付けとサイズ調整
                     if extract_frame(video_path, time_str, img_path):
                         img = ExcelImage(img_path)
-                        # 画像サイズを少し縮小（横幅400pxに統一）
-                        img.width = 400
-                        if img.height:
-                            img.height = int(img.height * (400 / img.width))
+                        
+                        # 元のサイズを取得して縦横比（アスペクト比）を崩さずに計算
+                        original_width = img.width
+                        original_height = img.height
+                        
+                        target_width = 400
+                        if original_width > 0:
+                            target_height = int(original_height * (target_width / original_width))
+                            img.width = target_width
+                            img.height = target_height
+                            
+                            # 画像の高さに合わせてExcelの行の高さを自動調整
+                            # (Excelの行の高さ単位はピクセルではなくポイントなので、約0.75倍して余白を足す)
+                            ws.row_dimensions[current_row].height = (target_height * 0.75) + 15
+                        else:
+                            ws.row_dimensions[current_row].height = 200
                         
                         # C列の該当するセルに画像を配置
                         ws.add_image(img, f'C{current_row}')
+                    else:
+                        # 画像がない場合
+                        ws.row_dimensions[current_row].height = 60
                     
                     current_row += 1
                 
