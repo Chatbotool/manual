@@ -1,5 +1,5 @@
 streamlit
-google-generativeai
 opencv-python-headless
 openpyxl
 Pillow
+
